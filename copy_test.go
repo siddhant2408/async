@@ -3,6 +3,7 @@ package async_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"testing"
 
 	"github.com/siddhant2408/async"
@@ -61,5 +62,62 @@ func TestCopyMultiple(t *testing.T) {
 	}
 	if expected3 != actual3 {
 		t.Fatalf("unexpected result, got %s want %s", actual3, expected3)
+	}
+}
+
+func BenchmarkCopyMultiple(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		expected1, expected2, expected3 := "test1", "test2", "test3"
+		reader1, reader2, reader3 := bytes.NewReader([]byte(expected1)), bytes.NewReader([]byte(expected2)), bytes.NewReader([]byte(expected3))
+		writer1, writer2, writer3 := new(bytes.Buffer), new(bytes.Buffer), new(bytes.Buffer)
+		asyncErr := async.CopyMultiple(context.Background(), []async.TeeReader{
+			{writer1, reader1},
+			{writer2, reader2},
+			{writer3, reader3},
+		})
+		err := asyncErr()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAsyncCopy(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		expected1, expected2, expected3 := "test1", "test2", "test3"
+		reader1, reader2, reader3 := bytes.NewReader([]byte(expected1)), bytes.NewReader([]byte(expected2)), bytes.NewReader([]byte(expected3))
+		writer1, writer2, writer3 := new(bytes.Buffer), new(bytes.Buffer), new(bytes.Buffer)
+		err := async.Copy(context.Background(), async.TeeReader{writer1, reader1})
+		if err() != nil {
+			b.Fatal(err)
+		}
+		err = async.Copy(context.Background(), async.TeeReader{writer2, reader2})
+		if err() != nil {
+			b.Fatal(err)
+		}
+		err = async.Copy(context.Background(), async.TeeReader{writer3, reader3})
+		if err() != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSyncCopy(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		expected1, expected2, expected3 := "test1", "test2", "test3"
+		reader1, reader2, reader3 := bytes.NewReader([]byte(expected1)), bytes.NewReader([]byte(expected2)), bytes.NewReader([]byte(expected3))
+		writer1, writer2, writer3 := new(bytes.Buffer), new(bytes.Buffer), new(bytes.Buffer)
+		_, err := io.Copy(writer1, reader1)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, err = io.Copy(writer2, reader2)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, err = io.Copy(writer3, reader3)
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }

@@ -77,6 +77,23 @@ func copySingle(ctx context.Context, teeReader TeeReader, buf []byte, errChan ch
 }
 
 func copy(ctx context.Context, teeReader TeeReader, buf []byte, errChan chan error) {
+	// If the reader has a WriteTo method, use it to do the copy.
+	// Avoids an allocation and a copy.
+	if wt, ok := teeReader.Reader.(io.WriterTo); ok {
+		_, err := wt.WriteTo(teeReader.Writer)
+		if err != nil {
+			errChan <- err
+		}
+		return
+	}
+	// Similarly, if the writer has a ReadFrom method, use it to do the copy.
+	if rt, ok := teeReader.Writer.(io.ReaderFrom); ok {
+		_, err := rt.ReadFrom(teeReader.Reader)
+		if err != nil {
+			errChan <- err
+		}
+		return
+	}
 	if buf == nil {
 		buf = make([]byte, bufferSize)
 	}
