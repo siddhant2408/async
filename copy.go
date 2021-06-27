@@ -9,30 +9,21 @@ import (
 
 const bufferSize = 1 << 15
 
-// ErrorHandle must be provided by the caller as a function to handle the error coming from the goroutine should it occur.
-type ErrorHandle func(err error)
-
 // Copy provides a non blocking way to copy data from reader to writer.
-func Copy(ctx context.Context, dst io.Writer, src io.Reader, errHandle ErrorHandle) func() {
-	return CopyBuffer(ctx, dst, src, nil, errHandle)
+func Copy(ctx context.Context, dst io.Writer, src io.Reader) ErrorHandle {
+	return CopyBuffer(ctx, dst, src, nil)
 }
 
-// CopyBuffer provides a non blocking way to copy data from reader to writer using a provided buffer
-// The callback function returned lets you handle the error by calling the ErrorHandle function provided during the call.
-// This provides a freedom to handle the error whenever we want to.
-// Please note that the returned function is a blocking one.
-func CopyBuffer(ctx context.Context, dst io.Writer, src io.Reader, buf []byte, errHandle ErrorHandle) func() {
+// CopyBuffer provides a non blocking way to copy data from reader to writer using a provided buffer.
+// The callback interface returned lets you handle the error async by calling the Err method.
+// The Err method can be called immediately for synchronous behaviour or deferred to handle the error asynchronously.
+func CopyBuffer(ctx context.Context, dst io.Writer, src io.Reader, buf []byte) ErrorHandle {
 	if buf == nil {
 		buf = make([]byte, bufferSize)
 	}
-	errChan := make(chan error, 1)
+	errChan := make(errorChannel, 1)
 	go copy(ctx, dst, src, buf, errChan)
-	return func() {
-		err, _ := <-errChan
-		if err != nil {
-			errHandle(err)
-		}
-	}
+	return errChan
 }
 
 func copy(ctx context.Context, dst io.Writer, src io.Reader, buf []byte, errChan chan error) {

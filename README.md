@@ -2,7 +2,19 @@
 
 ## Introduction
 
-Async wraps golang library methods and provides a way to call them in a non blocking way.
+Async wraps golang library methods and provides a way to call them in a non blocking way. The context parameter adds more control over the lifecycle of the goroutine.
+
+## ErrorHandle
+
+```go
+type ErrorHandle interface {
+	Err() error
+}
+```
+
+The ErrorHandle interface provides a method `Err()` that lets you handle the error coming from the async call, if any, in either of the 2 ways:
+1. Call this method before you need the result for synchronous behaviour.
+2. Defer it till the end of the caller lifecycle resulting in asynchronous behaviour.
 
 ## Basic Usage
 
@@ -10,18 +22,22 @@ Async wraps golang library methods and provides a way to call them in a non bloc
 go get github.com/siddhant2408/async
 ```
 
-## Copy
+### Copy
 
 ```go
-errHandle := async.ErrorHandle(func(err error) {
-	//handle the error
-})
-callback := async.Copy(ctx, dst, src, errHandle)
-defer callback()
+// asynchronous
+asyncErr := async.Copy(ctx, dst, src)
+defer func(asyncErr async.ErrorHandle) {
+	err := asyncErr.Err()
+	if err != nil {
+		//handle error
+	}
+}(asyncErr)
+
+// synchronous
+asyncErr := async.Copy(ctx, dst, src)
+err := asyncErr.Err()
+if err != nil {
+	//handle error
+}
 ```
-
-## Callback
-
-The callback method lets you handle the error coming from the method, if any, in a non blocking way in either of the 2 ways:
-1. You can call this method before you need the result as this method is blocking.
-2. Defer it till the end of the caller lifecycle. This lets you handle the error in an asynchronous way.

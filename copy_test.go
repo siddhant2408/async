@@ -12,9 +12,11 @@ func TestCopy(t *testing.T) {
 	expected := "test"
 	src := bytes.NewReader([]byte(expected))
 	dst := new(bytes.Buffer)
-	errHandle := func(err error) {}
-	errCallback := async.Copy(context.Background(), dst, src, async.ErrorHandle(errHandle))
-	errCallback()
+	asyncErr := async.Copy(context.Background(), dst, src)
+	err := asyncErr.Err()
+	if err != nil {
+		t.Fatal(err)
+	}
 	actual := dst.String()
 	if expected != actual {
 		t.Fatalf("unexpected result, got %s want %s", actual, expected)
@@ -25,10 +27,12 @@ func TestCopyBuffer(t *testing.T) {
 	expected := "test"
 	src := bytes.NewReader([]byte(expected))
 	dst := new(bytes.Buffer)
-	errHandle := func(err error) {}
 	buf := make([]byte, 1<<8)
-	errCallback := async.CopyBuffer(context.Background(), dst, src, buf, async.ErrorHandle(errHandle))
-	errCallback()
+	asyncErr := async.CopyBuffer(context.Background(), dst, src, buf)
+	err := asyncErr.Err()
+	if err != nil {
+		t.Fatal(err)
+	}
 	actual := dst.String()
 	if expected != actual {
 		t.Fatalf("unexpected result, got %s want %s", actual, expected)
