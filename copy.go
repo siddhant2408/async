@@ -1,39 +1,92 @@
-// Package async wraps golang library methods and provides a way to call them in a non blocking way.
 package async
 
 import (
 	"context"
-	"errors"
 	"io"
+	"sync"
 )
 
 const bufferSize = 1 << 15
 
-// Copy provides a non blocking way to copy data from reader to writer.
-func Copy(ctx context.Context, dst io.Writer, src io.Reader) ErrorHandle {
-	return CopyBuffer(ctx, dst, src, nil)
+// TeeReader represents a pair of Reader and Writer to perform the copy.
+// It's the job of the caller to validate the reader and writer interfaces.
+type TeeReader struct {
+	Writer io.Writer
+	Reader io.Reader
 }
 
-// CopyBuffer provides a non blocking way to copy data from reader to writer using a provided buffer.
-// The callback interface returned lets you handle the error async by calling the Err method.
-// The Err method can be called immediately for synchronous behaviour or deferred to handle the error asynchronously.
-func CopyBuffer(ctx context.Context, dst io.Writer, src io.Reader, buf []byte) ErrorHandle {
+// Copy provides a non blocking way to copy data from reader to writer.
+func Copy(ctx context.Context, teeReader TeeReader) ErrorHandle {
+	return CopyWithBuffer(ctx, teeReader, nil)
+}
+
+// CopyWithBuffer provides a non blocking way to copy data from reader to writer using a provided buffer.
+// The returned function can be called immediately for synchronous behaviour or deferred to handle the error asynchronously.
+func CopyWithBuffer(ctx context.Context, teeReader TeeReader, buf []byte) ErrorHandle {
+	errChan := make(chan error, 1)
+	go copySingle(ctx, teeReader, buf, errChan)
+	return func() error {
+		return <-errChan
+	}
+}
+
+// CopyMultiple performs concurrent copy of the tuples.
+// It returns the first error that occurs from the concurrent copy.
+// All copy goroutines are terminated as soon as an error occurs from any one of them.
+// Use Copy or CopyBuffer functions for single copy as this starts additional goroutines.
+func CopyMultiple(ctx context.Context, teeReaders []TeeReader) ErrorHandle {
+	ctx, cancel := context.WithCancel(ctx)
+	mainErrChan := make(chan error, 1)
+	errChan := make(chan error, len(teeReaders))
+	wg := new(sync.WaitGroup)
+	for _, reader := range teeReaders {
+		wg.Add(1)
+		go copyMultiple(ctx, reader, errChan, wg)
+	}
+	go runCopyManager(ctx, cancel, errChan, mainErrChan, wg)
+	return func() error {
+		return <-mainErrChan
+	}
+}
+
+func copyMultiple(ctx context.Context, teeReader TeeReader, errChan chan error, wg *sync.WaitGroup) {
+	defer wg.Done()
+	copy(ctx, teeReader, nil, errChan)
+}
+
+// copy manager waits till all copy goroutine operations are done and then closes the main error channel
+func runCopyManager(ctx context.Context, cancel context.CancelFunc, errChan chan error, mainErrChan chan error, wg *sync.WaitGroup) {
+	defer close(mainErrChan)
+	go runErrorListener(errChan, mainErrChan, cancel)
+	wg.Wait()
+	close(errChan)
+}
+
+// close all goroutines if an error comes from any goroutine performing the copy
+func runErrorListener(errChan chan error, mainErrChan chan error, cancel context.CancelFunc) {
+	err := <-errChan
+	if err != nil {
+		mainErrChan <- err
+		cancel()
+	}
+}
+
+func copySingle(ctx context.Context, teeReader TeeReader, buf []byte, errChan chan error) {
+	defer close(errChan)
+	copy(ctx, teeReader, buf, errChan)
+}
+
+func copy(ctx context.Context, teeReader TeeReader, buf []byte, errChan chan error) {
 	if buf == nil {
 		buf = make([]byte, bufferSize)
 	}
-	errChan := make(errorChannel, 1)
-	go copy(ctx, dst, src, buf, errChan)
-	return errChan
-}
-
-func copy(ctx context.Context, dst io.Writer, src io.Reader, buf []byte, errChan chan error) {
-	defer close(errChan)
+	reader := io.TeeReader(teeReader.Reader, teeReader.Writer)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			err := copyStream(dst, src, buf)
+			_, err := reader.Read(buf)
 			if err != nil {
 				if err != io.EOF {
 					errChan <- err
@@ -42,28 +95,4 @@ func copy(ctx context.Context, dst io.Writer, src io.Reader, buf []byte, errChan
 			}
 		}
 	}
-}
-
-// copystream copies data from src to dst equal to the size of the buffer
-func copyStream(dst io.Writer, src io.Reader, buf []byte) error {
-	nr, er := src.Read(buf)
-	if nr > 0 {
-		nw, ew := dst.Write(buf[0:nr])
-		if nw < 0 || nr < nw {
-			nw = 0
-			if ew == nil {
-				return errors.New("invalid write result")
-			}
-		}
-		if ew != nil {
-			return ew
-		}
-		if nr != nw {
-			return io.ErrShortWrite
-		}
-	}
-	if er != nil {
-		return er
-	}
-	return nil
 }

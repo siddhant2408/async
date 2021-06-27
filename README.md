@@ -7,12 +7,10 @@ Async wraps golang library methods and provides a way to call them in a non bloc
 ## ErrorHandle
 
 ```go
-type ErrorHandle interface {
-	Err() error
-}
+type ErrorHandle func() error
 ```
 
-The ErrorHandle interface provides a method `Err()` that lets you handle the error coming from the async call, if any, in either of the 2 ways:
+The ErrorHandle function lets you handle the error coming from the async call, if any, in either of the 2 ways:
 1. Call this method before you need the result for synchronous behaviour.
 2. Defer it till the end of the caller lifecycle resulting in asynchronous behaviour.
 
@@ -26,17 +24,17 @@ go get github.com/siddhant2408/async
 
 ```go
 // asynchronous
-asyncErr := async.Copy(ctx, dst, src)
+asyncErr := async.Copy(ctx, async.TeeReader{dst, src})
 defer func(asyncErr async.ErrorHandle) {
-	err := asyncErr.Err()
+	err := asyncErr()
 	if err != nil {
 		//handle error
 	}
 }(asyncErr)
 
 // synchronous
-asyncErr := async.Copy(ctx, dst, src)
-err := asyncErr.Err()
+asyncErr := async.CopyMultiple(ctx, []async.TeeReader{{dst1, src1}, {dst2, src2}})
+err := asyncErr()
 if err != nil {
 	//handle error
 }
