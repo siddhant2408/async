@@ -17,6 +17,7 @@ errHandle := async.ErrorHandle(func(err error) {
 	//handle the error
 })
 callback := async.Copy(ctx, dst, src, errHandle)
+defer callback()
 ```
 
 ## Callback
