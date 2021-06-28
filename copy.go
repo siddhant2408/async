@@ -16,13 +16,13 @@ type TeeReader struct {
 }
 
 // Copy provides a non blocking way to copy data from reader to writer.
-func Copy(ctx context.Context, teeReader TeeReader) ErrorHandle {
+func Copy(ctx context.Context, teeReader *TeeReader) ErrorHandle {
 	return CopyWithBuffer(ctx, teeReader, nil)
 }
 
 // CopyWithBuffer provides a non blocking way to copy data from reader to writer using a provided buffer.
 // The returned function can be called immediately for synchronous behaviour or deferred to handle the error asynchronously.
-func CopyWithBuffer(ctx context.Context, teeReader TeeReader, buf []byte) ErrorHandle {
+func CopyWithBuffer(ctx context.Context, teeReader *TeeReader, buf []byte) ErrorHandle {
 	errChan := make(chan error, 1)
 	go copySingle(ctx, teeReader, buf, errChan)
 	return func() error {
@@ -34,7 +34,7 @@ func CopyWithBuffer(ctx context.Context, teeReader TeeReader, buf []byte) ErrorH
 // It returns the first error that occurs from the concurrent copy.
 // All copy goroutines are terminated as soon as an error occurs from any one of them.
 // Use Copy or CopyBuffer functions for single copy as this starts additional goroutines.
-func CopyMultiple(ctx context.Context, teeReaders []TeeReader) ErrorHandle {
+func CopyMultiple(ctx context.Context, teeReaders []*TeeReader) ErrorHandle {
 	ctx, cancel := context.WithCancel(ctx)
 	mainErrChan := make(chan error, 1)
 	errChan := make(chan error, len(teeReaders))
@@ -49,7 +49,7 @@ func CopyMultiple(ctx context.Context, teeReaders []TeeReader) ErrorHandle {
 	}
 }
 
-func copyMultiple(ctx context.Context, teeReader TeeReader, errChan chan error, wg *sync.WaitGroup) {
+func copyMultiple(ctx context.Context, teeReader *TeeReader, errChan chan error, wg *sync.WaitGroup) {
 	defer wg.Done()
 	copy(ctx, teeReader, nil, errChan)
 }
@@ -71,12 +71,12 @@ func runErrorListener(errChan chan error, mainErrChan chan error, cancel context
 	}
 }
 
-func copySingle(ctx context.Context, teeReader TeeReader, buf []byte, errChan chan error) {
+func copySingle(ctx context.Context, teeReader *TeeReader, buf []byte, errChan chan error) {
 	defer close(errChan)
 	copy(ctx, teeReader, buf, errChan)
 }
 
-func copy(ctx context.Context, teeReader TeeReader, buf []byte, errChan chan error) {
+func copy(ctx context.Context, teeReader *TeeReader, buf []byte, errChan chan error) {
 	// If the reader has a WriteTo method, use it to do the copy.
 	// Avoids an allocation and a copy.
 	if wt, ok := teeReader.Reader.(io.WriterTo); ok {

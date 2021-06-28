@@ -3,7 +3,9 @@ package async_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/siddhant2408/async"
@@ -13,7 +15,7 @@ func TestCopy(t *testing.T) {
 	expected := "test"
 	src := bytes.NewReader([]byte(expected))
 	dst := new(bytes.Buffer)
-	asyncErr := async.Copy(context.Background(), async.TeeReader{dst, src})
+	asyncErr := async.Copy(context.Background(), &async.TeeReader{dst, src})
 	err := asyncErr()
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +31,7 @@ func TestCopyBuffer(t *testing.T) {
 	src := bytes.NewReader([]byte(expected))
 	dst := new(bytes.Buffer)
 	buf := make([]byte, 1<<8)
-	asyncErr := async.CopyWithBuffer(context.Background(), async.TeeReader{dst, src}, buf)
+	asyncErr := async.CopyWithBuffer(context.Background(), &async.TeeReader{dst, src}, buf)
 	err := asyncErr()
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +46,7 @@ func TestCopyMultiple(t *testing.T) {
 	expected1, expected2, expected3 := "test1", "test2", "test3"
 	reader1, reader2, reader3 := bytes.NewReader([]byte(expected1)), bytes.NewReader([]byte(expected2)), bytes.NewReader([]byte(expected3))
 	writer1, writer2, writer3 := new(bytes.Buffer), new(bytes.Buffer), new(bytes.Buffer)
-	asyncErr := async.CopyMultiple(context.Background(), []async.TeeReader{
+	asyncErr := async.CopyMultiple(context.Background(), []*async.TeeReader{
 		{writer1, reader1},
 		{writer2, reader2},
 		{writer3, reader3},
@@ -66,15 +68,33 @@ func TestCopyMultiple(t *testing.T) {
 }
 
 func BenchmarkCopyMultiple(b *testing.B) {
+	sampleSize := []int{1 << 5, 1 << 10, 1 << 15, 1 << 20}
+	numCopies := []int{5, 10, 15, 20}
+	for _, curSampleSize := range sampleSize {
+		for _, curNumCopy := range numCopies {
+			b.Run(fmt.Sprintf("sampleSize=%d;numCopies=%d", curSampleSize, curNumCopy), func(b *testing.B) {
+				runCopyMultiple(b, curNumCopy, curSampleSize)
+			})
+		}
+	}
+}
+
+func runCopyMultiple(b *testing.B, numCopy int, sampleSize int) {
+	s := new(strings.Builder)
+	for i := 0; i < sampleSize; i++ {
+		_, err := s.WriteString("test")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	sbyte := []byte(s.String())
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		expected1, expected2, expected3 := "test1", "test2", "test3"
-		reader1, reader2, reader3 := bytes.NewReader([]byte(expected1)), bytes.NewReader([]byte(expected2)), bytes.NewReader([]byte(expected3))
-		writer1, writer2, writer3 := new(bytes.Buffer), new(bytes.Buffer), new(bytes.Buffer)
-		asyncErr := async.CopyMultiple(context.Background(), []async.TeeReader{
-			{writer1, reader1},
-			{writer2, reader2},
-			{writer3, reader3},
-		})
+		var tr []*async.TeeReader
+		for i := 0; i < numCopy; i++ {
+			tr = append(tr, &async.TeeReader{new(bytes.Buffer), bytes.NewReader(sbyte)})
+		}
+		asyncErr := async.CopyMultiple(context.Background(), tr)
 		err := asyncErr()
 		if err != nil {
 			b.Fatal(err)
@@ -82,42 +102,36 @@ func BenchmarkCopyMultiple(b *testing.B) {
 	}
 }
 
-func BenchmarkAsyncCopy(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		expected1, expected2, expected3 := "test1", "test2", "test3"
-		reader1, reader2, reader3 := bytes.NewReader([]byte(expected1)), bytes.NewReader([]byte(expected2)), bytes.NewReader([]byte(expected3))
-		writer1, writer2, writer3 := new(bytes.Buffer), new(bytes.Buffer), new(bytes.Buffer)
-		err := async.Copy(context.Background(), async.TeeReader{writer1, reader1})
-		if err() != nil {
-			b.Fatal(err)
-		}
-		err = async.Copy(context.Background(), async.TeeReader{writer2, reader2})
-		if err() != nil {
-			b.Fatal(err)
-		}
-		err = async.Copy(context.Background(), async.TeeReader{writer3, reader3})
-		if err() != nil {
-			b.Fatal(err)
+func BenchmarkIOCopy(b *testing.B) {
+	sampleSize := []int{1 << 5, 1 << 10, 1 << 15, 1 << 20}
+	numCopies := []int{5, 10, 15, 20}
+	for _, curSampleSize := range sampleSize {
+		for _, curNumCopy := range numCopies {
+			b.Run(fmt.Sprintf("sampleSize=%d;numCopies=%d", curSampleSize, curNumCopy), func(b *testing.B) {
+				runIOCopy(b, curNumCopy, curSampleSize)
+			})
 		}
 	}
 }
 
-func BenchmarkSyncCopy(b *testing.B) {
+func runIOCopy(b *testing.B, numCopy int, sampleSize int) {
+	s := new(strings.Builder)
+	for i := 0; i < sampleSize; i++ {
+		_, err := s.WriteString("test")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	sbyte := []byte(s.String())
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		expected1, expected2, expected3 := "test1", "test2", "test3"
-		reader1, reader2, reader3 := bytes.NewReader([]byte(expected1)), bytes.NewReader([]byte(expected2)), bytes.NewReader([]byte(expected3))
-		writer1, writer2, writer3 := new(bytes.Buffer), new(bytes.Buffer), new(bytes.Buffer)
-		_, err := io.Copy(writer1, reader1)
-		if err != nil {
-			b.Fatal(err)
-		}
-		_, err = io.Copy(writer2, reader2)
-		if err != nil {
-			b.Fatal(err)
-		}
-		_, err = io.Copy(writer3, reader3)
-		if err != nil {
-			b.Fatal(err)
+		for i := 0; i < numCopy; i++ {
+			reader := bytes.NewReader(sbyte)
+			writer := new(bytes.Buffer)
+			_, err := io.Copy(writer, reader)
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
