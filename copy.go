@@ -79,6 +79,7 @@ func copySingle(ctx context.Context, teeReader *TeeReader, buf []byte, errChan c
 func copy(ctx context.Context, teeReader *TeeReader, buf []byte, errChan chan error) {
 	// If the reader has a WriteTo method, use it to do the copy.
 	// Avoids an allocation and a copy.
+	// Yes, it is not context cancellable but it prevents explicit buffer allocation.
 	if wt, ok := teeReader.Reader.(io.WriterTo); ok {
 		_, err := wt.WriteTo(teeReader.Writer)
 		if err != nil {
@@ -97,18 +98,25 @@ func copy(ctx context.Context, teeReader *TeeReader, buf []byte, errChan chan er
 	if buf == nil {
 		buf = make([]byte, bufferSize)
 	}
+	err := copyWithContext(ctx, teeReader, buf)
+	if err != nil {
+		errChan <- err
+	}
+}
+
+func copyWithContext(ctx context.Context, teeReader *TeeReader, buf []byte) error {
 	reader := io.TeeReader(teeReader.Reader, teeReader.Writer)
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 			_, err := reader.Read(buf)
 			if err != nil {
 				if err != io.EOF {
-					errChan <- err
+					return err
 				}
-				return
+				return nil
 			}
 		}
 	}

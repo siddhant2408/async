@@ -13,14 +13,14 @@ import (
 
 func TestCopy(t *testing.T) {
 	expected := "test"
-	src := bytes.NewReader([]byte(expected))
-	dst := new(bytes.Buffer)
+	src := &mockReader{bytes.NewReader([]byte(expected))}
+	dst := &mockWriter{new(bytes.Buffer)}
 	asyncErr := async.Copy(context.Background(), &async.TeeReader{dst, src})
 	err := asyncErr()
 	if err != nil {
 		t.Fatal(err)
 	}
-	actual := dst.String()
+	actual := dst.buf.String()
 	if expected != actual {
 		t.Fatalf("unexpected result, got %s want %s", actual, expected)
 	}
@@ -29,14 +29,14 @@ func TestCopy(t *testing.T) {
 func TestCopyBuffer(t *testing.T) {
 	expected := "test"
 	src := bytes.NewReader([]byte(expected))
-	dst := new(bytes.Buffer)
+	dst := &mockWriter{new(bytes.Buffer)}
 	buf := make([]byte, 1<<8)
 	asyncErr := async.CopyWithBuffer(context.Background(), &async.TeeReader{dst, src}, buf)
 	err := asyncErr()
 	if err != nil {
 		t.Fatal(err)
 	}
-	actual := dst.String()
+	actual := dst.buf.String()
 	if expected != actual {
 		t.Fatalf("unexpected result, got %s want %s", actual, expected)
 	}
@@ -92,7 +92,9 @@ func runCopyMultiple(b *testing.B, numCopy int, sampleSize int) {
 	for i := 0; i < b.N; i++ {
 		var tr []*async.TeeReader
 		for i := 0; i < numCopy; i++ {
-			tr = append(tr, &async.TeeReader{new(bytes.Buffer), bytes.NewReader(sbyte)})
+			tr = append(tr, &async.TeeReader{
+				&mockWriter{new(bytes.Buffer)},
+				&mockReader{bytes.NewReader(sbyte)}})
 		}
 		asyncErr := async.CopyMultiple(context.Background(), tr)
 		err := asyncErr()
@@ -107,9 +109,10 @@ func BenchmarkIOCopy(b *testing.B) {
 	numCopies := []int{5, 10, 15, 20}
 	for _, curSampleSize := range sampleSize {
 		for _, curNumCopy := range numCopies {
-			b.Run(fmt.Sprintf("sampleSize=%d;numCopies=%d", curSampleSize, curNumCopy), func(b *testing.B) {
-				runIOCopy(b, curNumCopy, curSampleSize)
-			})
+			b.Run(fmt.Sprintf("sampleSize=%d;numCopies=%d", curSampleSize, curNumCopy),
+				func(b *testing.B) {
+					runIOCopy(b, curNumCopy, curSampleSize)
+				})
 		}
 	}
 }
@@ -123,15 +126,34 @@ func runIOCopy(b *testing.B, numCopy int, sampleSize int) {
 		}
 	}
 	sbyte := []byte(s.String())
+	buf := make([]byte, 1<<15)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for i := 0; i < numCopy; i++ {
-			reader := bytes.NewReader(sbyte)
-			writer := new(bytes.Buffer)
-			_, err := io.Copy(writer, reader)
+			reader := &mockReader{bytes.NewReader(sbyte)}
+			writer := &mockWriter{new(bytes.Buffer)}
+			_, err := io.CopyBuffer(writer, reader, buf)
 			if err != nil {
 				b.Fatal(err)
 			}
 		}
 	}
+}
+
+// these types are provided as an input to the methods as it does not implement io.WriteTo so
+// that buffer allocation can happen
+type mockReader struct {
+	buf *bytes.Reader
+}
+
+func (m *mockReader) Read(p []byte) (int, error) {
+	return m.buf.Read(p)
+}
+
+type mockWriter struct {
+	buf *bytes.Buffer
+}
+
+func (m *mockWriter) Write(p []byte) (int, error) {
+	return m.buf.Write(p)
 }
